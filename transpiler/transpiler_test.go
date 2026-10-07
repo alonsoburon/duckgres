@@ -5126,3 +5126,23 @@ func TestTranspile_ShowMaxIndexKeys(t *testing.T) {
 		t.Errorf("SHOW max_index_keys should yield 32, got %q", result.SQL)
 	}
 }
+
+// psql 18 `\d <table>` references the alias of generate_series as a column
+// (prattrs[s]); PostgreSQL names that column after the alias.
+func TestTranspile_FunctionAliasNamesItsColumn(t *testing.T) {
+	tr := New(Config{DuckLakeMode: true})
+	result, err := tr.Transpile("SELECT s FROM pg_catalog.generate_series(0, 2) s")
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	if !strings.Contains(result.SQL, "s(s)") {
+		t.Errorf("alias should name its column (s(s)), got %q", result.SQL)
+	}
+	keep, err := tr.Transpile("SELECT n FROM pg_catalog.generate_series(1, 32) pos(n)")
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	if strings.Contains(keep.SQL, "pos(n, ") || !strings.Contains(keep.SQL, "pos(n)") {
+		t.Errorf("explicit column list must be kept, got %q", keep.SQL)
+	}
+}

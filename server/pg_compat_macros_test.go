@@ -242,6 +242,7 @@ func TestCompatMacros_PsqlDescribeTable(t *testing.T) {
 		{"pg_partition_ancestors_is_the_relation", `SELECT pg_partition_ancestors('23282')::VARCHAR`, "23282", false},
 		{"pg_partition_ancestors_in_subquery", `SELECT (23282 IN (SELECT pg_partition_ancestors('23282') UNION ALL VALUES (1)))::VARCHAR`, "true", false},
 		{"current_setting_max_index_keys", `SELECT current_setting('max_index_keys')`, "32", false},
+		{"pg_publication_rel_has_row_filter_columns", `SELECT count(*)::VARCHAR FROM pg_publication_rel WHERE prqual IS NULL AND prattrs IS NULL`, "0", false},
 		{"reloptions_unnests", `SELECT count(*)::VARCHAR FROM (SELECT unnest(reloptions) AS x FROM pg_class_full)`, "0", false},
 	})
 }

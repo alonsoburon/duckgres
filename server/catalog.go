@@ -239,7 +239,9 @@ func initPgCatalog(db *sql.DB, serverStartTime, processStartTime time.Time, serv
 		SELECT
 			0::BIGINT AS oid,
 			0::BIGINT AS prpubid,
-			0::BIGINT AS prrelid
+			0::BIGINT AS prrelid,
+			NULL::VARCHAR AS prqual,
+			NULL::SMALLINT[] AS prattrs
 		WHERE false
 	`
 	if _, err := db.Exec(pgPublicationRelSQL); err != nil {

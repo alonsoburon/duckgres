@@ -82,24 +82,37 @@ var dangerousReadFunctions = map[string]struct{}{
 // unqualifiedMetadataRelations are the read-only pg_catalog relations a scoped
 // connection may query. The ones that describe user objects are served from
 // session views narrowed to the connection's schemas (server/sessionmeta);
-// pg_am, pg_proc and pg_collation describe the engine, not the data.
+// pg_am, pg_proc and pg_collation describe the engine, not the data. The
+// inheritance, policy, publication, rewrite, statistics and trigger relations
+// are empty compatibility views (DuckDB has none of those features); psql's
+// \d <table> reads them.
 var unqualifiedMetadataRelations = map[string]struct{}{
-	"pg_am":          {},
-	"pg_attrdef":     {},
-	"pg_attribute":   {},
-	"pg_class":       {},
-	"pg_collation":   {},
-	"pg_constraint":  {},
-	"pg_database":    {},
-	"pg_description": {},
-	"pg_index":       {},
-	"pg_namespace":   {},
-	"pg_proc":        {},
-	"pg_roles":       {},
-	"pg_settings":    {},
-	"pg_tables":      {},
-	"pg_type":        {},
-	"pg_views":       {},
+	"pg_am":                    {},
+	"pg_attrdef":               {},
+	"pg_attribute":             {},
+	"pg_class":                 {},
+	"pg_collation":             {},
+	"pg_constraint":            {},
+	"pg_database":              {},
+	"pg_description":           {},
+	"pg_foreign_table":         {},
+	"pg_index":                 {},
+	"pg_inherits":              {},
+	"pg_namespace":             {},
+	"pg_partitioned_table":     {},
+	"pg_policy":                {},
+	"pg_proc":                  {},
+	"pg_publication":           {},
+	"pg_publication_namespace": {},
+	"pg_publication_rel":       {},
+	"pg_rewrite":               {},
+	"pg_statistic_ext":         {},
+	"pg_trigger":               {},
+	"pg_roles":                 {},
+	"pg_settings":              {},
+	"pg_tables":                {},
+	"pg_type":                  {},
+	"pg_views":                 {},
 }
 
 var informationSchemaRelations = map[string]struct{}{
@@ -250,7 +263,7 @@ func (az *queryAuthorizer) walk(node *pg_query.Node, visibleCTEs map[string]stru
 	}
 	if fc := node.GetFuncCall(); fc != nil {
 		name := functionName(fc)
-		if dangerousFunction(name) {
+		if dangerousFunction(name) && !allowedSettingLookup(name, fc) {
 			return &QueryAccessError{Reason: fmt.Sprintf("function %q is unavailable to project connections", name)}
 		}
 	}
@@ -376,6 +389,22 @@ func authorizeProjectUse(query string) (bool, error) {
 		return true, &QueryAccessError{Reason: fmt.Sprintf("catalog %q is not available to this project", catalog)}
 	}
 	return true, nil
+}
+
+// allowedSettingLookup permits current_setting('<name>') when <name> is a
+// string literal naming one of the variables SHOW already exposes (pgjdbc reads
+// max_index_keys this way). Any other argument shape stays blocked: a computed
+// name could reach engine settings such as S3 keys.
+func allowedSettingLookup(name string, call *pg_query.FuncCall) bool {
+	if name != "current_setting" || len(call.Args) < 1 || len(call.Args) > 2 {
+		return false
+	}
+	c := call.Args[0].GetAConst()
+	if c == nil || c.GetSval() == nil {
+		return false
+	}
+	_, ok := allowedShowVariables[strings.ToLower(c.GetSval().Sval)]
+	return ok
 }
 
 func dangerousFunction(name string) bool {

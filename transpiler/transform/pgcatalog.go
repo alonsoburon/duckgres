@@ -575,6 +575,9 @@ func (t *PgCatalogTransform) walkAndTransform(node *pg_query.Node, changed *bool
 	case *pg_query.Node_RangeFunction:
 		// Function in FROM clause like: FROM unnest(...)
 		if n.RangeFunction != nil {
+			if nameSingleColumnFunctionAlias(n.RangeFunction) {
+				*changed = true
+			}
 			for _, funcList := range n.RangeFunction.Functions {
 				// Each function is wrapped in a List
 				if list := funcList.GetList(); list != nil {
@@ -736,4 +739,34 @@ func (t *PgCatalogTransform) walkSelectStmt(stmt *pg_query.SelectStmt, changed *
 	if stmt.Rarg != nil {
 		t.walkSelectStmt(stmt.Rarg, changed)
 	}
+}
+
+// nameSingleColumnFunctionAlias gives `FROM generate_series(..) s` the column
+// name PostgreSQL gives it: a scalar-returning function in FROM with a table
+// alias and no column list names its single column after the alias. DuckDB
+// instead keeps the function name, so a reference to the bare alias (psql 18
+// \d uses `prattrs[s]`) binds to the whole row as a STRUCT.
+func nameSingleColumnFunctionAlias(rf *pg_query.RangeFunction) bool {
+	if rf.Alias == nil || rf.Alias.Aliasname == "" || len(rf.Alias.Colnames) > 0 ||
+		rf.Ordinality || rf.IsRowsfrom || len(rf.Functions) != 1 {
+		return false
+	}
+	list := rf.Functions[0].GetList()
+	if list == nil || len(list.Items) == 0 {
+		return false
+	}
+	call := list.Items[0].GetFuncCall()
+	if call == nil || len(call.Funcname) == 0 {
+		return false
+	}
+	name := call.Funcname[len(call.Funcname)-1].GetString_()
+	if name == nil {
+		return false
+	}
+	switch strings.ToLower(name.Sval) {
+	case "generate_series", "unnest":
+		rf.Alias.Colnames = []*pg_query.Node{pg_query.MakeStrNode(rf.Alias.Aliasname)}
+		return true
+	}
+	return false
 }
