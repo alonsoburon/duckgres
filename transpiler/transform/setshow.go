@@ -308,9 +308,11 @@ func NewSetShowTransform() *SetShowTransform {
 			"operator_precedence_warning": true,
 
 			// Server version settings (commonly queried)
-			"server_version":     true,
-			"server_version_num": true,
-			"server_encoding":    true,
+			"server_version":        true,
+			"server_version_num":    true,
+			"server_encoding":       true,
+			"max_index_keys":        true,
+			"max_identifier_length": true,
 
 			// Timezone (DuckDB has its own timezone setting)
 			"timezone":               true,
@@ -699,6 +701,7 @@ func (t *SetShowTransform) getDefaultValue(paramName string) string {
 
 		// Other commonly queried settings
 		"max_identifier_length": "63",
+		"max_index_keys":        "32",
 		"default_tablespace":    "",
 		"temp_tablespaces":      "",
 		"lc_collate":            "en_US.UTF-8",

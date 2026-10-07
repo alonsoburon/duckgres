@@ -29,6 +29,7 @@ func TestQueryAccessPolicyAllowsProjectReads(t *testing.T) {
 		"SELECT * FROM information_schema.key_column_usage",
 		"SELECT * FROM information_schema.table_constraints",
 		"SHOW search_path",
+		"SHOW max_index_keys",
 		"SET statement_timeout = '30s'",
 		"SET application_name = 'posthog-sql-editor'",
 		"USE ducklake",

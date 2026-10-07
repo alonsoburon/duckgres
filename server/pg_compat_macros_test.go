@@ -234,3 +234,14 @@ func TestCompatTableMacros_BatchD(t *testing.T) {
 		{"pg_identify_object_null_type", `SELECT (type IS NULL)::VARCHAR FROM pg_identify_object(0, 0, 0)`, "true", false},
 	})
 }
+
+// psql 18 `\d <table>` / `\d+ <table>` need pg_partition_ancestors() and a
+// pg_class.reloptions that unnest() can bind.
+func TestCompatMacros_PsqlDescribeTable(t *testing.T) {
+	runMacroCases(t, []macroCase{
+		{"pg_partition_ancestors_is_the_relation", `SELECT pg_partition_ancestors('23282')::VARCHAR`, "23282", false},
+		{"pg_partition_ancestors_in_subquery", `SELECT (23282 IN (SELECT pg_partition_ancestors('23282') UNION ALL VALUES (1)))::VARCHAR`, "true", false},
+		{"current_setting_max_index_keys", `SELECT current_setting('max_index_keys')`, "32", false},
+		{"reloptions_unnests", `SELECT count(*)::VARCHAR FROM (SELECT unnest(reloptions) AS x FROM pg_class_full)`, "0", false},
+	})
+}

@@ -335,7 +335,7 @@ func internalCompatRelationNamesSQL() string {
 	return `
 		'pg_database', 'pg_class_full', 'pg_collation', 'pg_policy', 'pg_roles',
 		'pg_statistic_ext', 'pg_publication_tables', 'pg_rules', 'pg_publication',
-		'pg_publication_rel', 'pg_inherits', 'pg_namespace', 'pg_matviews',
+		'pg_publication_rel', 'pg_publication_namespace', 'pg_inherits', 'pg_namespace', 'pg_matviews',
 		'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 		'pg_partitioned_table', 'pg_rewrite', 'pg_type', 'pg_attribute',
 		'pg_tables', 'pg_views', 'pg_sequences',
@@ -396,7 +396,7 @@ func buildSessionPgClassViewSQL(access *MetadataAccessPolicy) string {
 				0 AS relfrozenxid,
 				NULL AS relminmxid,
 				NULL AS relacl,
-				NULL AS reloptions,
+				CAST(NULL AS VARCHAR[]) AS reloptions,
 				NULL AS relpartbound,
 				database_name
 			FROM duckdb_tables()
@@ -438,7 +438,7 @@ func buildSessionPgClassViewSQL(access *MetadataAccessPolicy) string {
 				0 AS relfrozenxid,
 				NULL AS relminmxid,
 				NULL AS relacl,
-				NULL AS reloptions,
+				CAST(NULL AS VARCHAR[]) AS reloptions,
 				NULL AS relpartbound,
 				database_name
 			FROM duckdb_views()
@@ -480,7 +480,7 @@ func buildSessionPgClassViewSQL(access *MetadataAccessPolicy) string {
 				0 AS relfrozenxid,
 				NULL AS relminmxid,
 				NULL AS relacl,
-				NULL AS reloptions,
+				CAST(NULL AS VARCHAR[]) AS reloptions,
 				NULL AS relpartbound,
 				database_name
 			FROM duckdb_sequences()
@@ -522,7 +522,7 @@ func buildSessionPgClassViewSQL(access *MetadataAccessPolicy) string {
 				0 AS relfrozenxid,
 				NULL AS relminmxid,
 				NULL AS relacl,
-				NULL AS reloptions,
+				CAST(NULL AS VARCHAR[]) AS reloptions,
 				NULL AS relpartbound,
 				database_name
 			FROM duckdb_indexes()
@@ -961,7 +961,7 @@ func buildSessionInformationSchemaTablesViewSQL(access *MetadataAccessPolicy) st
 		WHERE t.table_name NOT IN (
 			'__duckgres_column_metadata', '__duckgres_iceberg_column_metadata',
 			'pg_class_full', 'pg_collation', 'pg_database', 'pg_inherits',
-			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel',
+			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel', 'pg_publication_namespace',
 			'pg_publication_tables', 'pg_roles', 'pg_rules', 'pg_statistic_ext', 'pg_matviews',
 			'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 			'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',
@@ -1034,7 +1034,7 @@ func buildSessionInformationSchemaViewsViewSQL(access *MetadataAccessPolicy) str
 		FROM information_schema.views v
 		WHERE v.table_name NOT IN (
 			'pg_class_full', 'pg_collation', 'pg_database', 'pg_inherits',
-			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel',
+			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel', 'pg_publication_namespace',
 			'pg_publication_tables', 'pg_roles', 'pg_rules', 'pg_statistic_ext', 'pg_matviews',
 			'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 			'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',

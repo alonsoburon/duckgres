@@ -130,6 +130,7 @@ var allowedShowVariables = map[string]struct{}{
 	"datestyle":                     {},
 	"default_transaction_isolation": {},
 	"integer_datetimes":             {},
+	"max_index_keys":                {},
 	"search_path":                   {},
 	"server_version":                {},
 	"server_version_num":            {},

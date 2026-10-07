@@ -47,6 +47,7 @@ func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
 			"pg_rules":                "pg_rules",
 			"pg_publication":          "pg_publication",
 			"pg_publication_rel":      "pg_publication_rel",
+			"pg_publication_namespace": "pg_publication_namespace",
 			"pg_inherits":             "pg_inherits",
 			"pg_matviews":             "pg_matviews",
 			"pg_stat_user_tables":     "pg_stat_user_tables",
@@ -118,6 +119,7 @@ func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
 			"version":                         true,
 			"similar_to_escape":               true, // Convert SIMILAR TO patterns to regex
 			"unnest":                          true, // DuckDB has unnest, just strip pg_catalog prefix
+			"generate_series":                 true, // pgjdbc getImportedKeys: pg_catalog.generate_series(1, n) pos(n)
 			"json_object":                     true, // DuckDB native function, just strip pg_catalog prefix
 			"uptime":                          true, // Server uptime as INTERVAL
 			"worker_uptime":                   true, // Current process uptime as INTERVAL
@@ -152,6 +154,7 @@ func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
 			"pg_jit_available":                   true, // JIT stub (false)
 			"row_security_active":                true, // RLS stub (false)
 			"pg_collation_for":                   true, // Collation stub
+			"pg_partition_ancestors":             true, // psql 18 \d: the relation is its own ancestor
 			"pg_input_is_valid":                  true, // Bounded input validator
 			"to_regclass":                        true, // Name->oid probe
 			"to_regtype":                         true, // Type-name->oid probe
@@ -250,6 +253,7 @@ func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
 			"pg_jit_available":                   true, // JIT stub (false)
 			"row_security_active":                true, // RLS stub (false)
 			"pg_collation_for":                   true, // Collation stub
+			"pg_partition_ancestors":             true, // psql 18 \d: the relation is its own ancestor
 			"pg_input_is_valid":                  true, // Bounded input validator
 			"to_regclass":                        true, // Name->oid probe
 			"to_regtype":                         true, // Type-name->oid probe

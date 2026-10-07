@@ -5101,3 +5101,28 @@ func TestTranspile_SessionUserUnsetKeepsNativeBehaviour(t *testing.T) {
 		t.Errorf("SessionUser unset must not inject a literal, got %q", result.SQL)
 	}
 }
+
+// pgjdbc's getImportedKeys/getExportedKeys joins pg_catalog.generate_series(1,
+// max_index_keys) as a table function; DuckDB has no such function in pg_catalog.
+func TestTranspile_QualifiedGenerateSeries(t *testing.T) {
+	tr := New(Config{DuckLakeMode: true})
+	result, err := tr.Transpile("SELECT pos.n FROM pg_catalog.generate_series(1, 32) pos(n)")
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	if strings.Contains(result.SQL, "pg_catalog") || !strings.Contains(result.SQL, "generate_series(1, 32)") {
+		t.Errorf("pg_catalog.generate_series not unqualified: %q", result.SQL)
+	}
+}
+
+// pgjdbc getImportedKeys needs max_index_keys; SHOW must answer PostgreSQL's value.
+func TestTranspile_ShowMaxIndexKeys(t *testing.T) {
+	tr := New(Config{DuckLakeMode: true})
+	result, err := tr.Transpile("SHOW max_index_keys")
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	if !strings.Contains(result.SQL, "32") {
+		t.Errorf("SHOW max_index_keys should yield 32, got %q", result.SQL)
+	}
+}

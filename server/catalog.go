@@ -97,7 +97,7 @@ func initPgCatalog(db *sql.DB, serverStartTime, processStartTime time.Time, serv
 		WHERE relname NOT IN (
 			'pg_database', 'pg_class_full', 'pg_collation', 'pg_policy', 'pg_roles',
 			'pg_statistic_ext', 'pg_publication_tables', 'pg_rules', 'pg_publication',
-			'pg_publication_rel', 'pg_inherits', 'pg_namespace', 'pg_matviews',
+			'pg_publication_rel', 'pg_publication_namespace', 'pg_inherits', 'pg_namespace', 'pg_matviews',
 			'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 			'pg_partitioned_table', 'pg_rewrite', 'pg_type', 'pg_attribute',
 			'information_schema_columns_compat', 'information_schema_tables_compat',
@@ -244,6 +244,19 @@ func initPgCatalog(db *sql.DB, serverStartTime, processStartTime time.Time, serv
 	`
 	if _, err := db.Exec(pgPublicationRelSQL); err != nil {
 		slog.Warn("Failed to create pg_publication_rel view.", "error", err)
+	}
+
+	// Create pg_publication_namespace view (PG15+ schema publications, empty; psql 18 \d)
+	pgPublicationNamespaceSQL := `
+		CREATE OR REPLACE VIEW pg_publication_namespace AS
+		SELECT
+			0::BIGINT AS oid,
+			0::BIGINT AS pnpubid,
+			0::BIGINT AS pnnspid
+		WHERE false
+	`
+	if _, err := db.Exec(pgPublicationNamespaceSQL); err != nil {
+		slog.Warn("Failed to create pg_publication_namespace view.", "error", err)
 	}
 
 	// Create pg_inherits view (table inheritance, empty - DuckDB doesn't support inheritance)
@@ -1089,6 +1102,8 @@ func initPgCatalog(db *sql.DB, serverStartTime, processStartTime time.Time, serv
 			CASE name
 				WHEN 'server_version' THEN '15.0'
 				WHEN 'server_encoding' THEN 'UTF8'
+				WHEN 'max_index_keys' THEN '32'
+				WHEN 'max_identifier_length' THEN '63'
 				ELSE ''
 			END`,
 		// pg_is_in_recovery - check if in recovery mode
@@ -1222,6 +1237,11 @@ func initPgCatalog(db *sql.DB, serverStartTime, processStartTime time.Time, serv
 
 		// pg_collation_for - effective collation of an expression; we report the default collation.
 		`CREATE OR REPLACE MACRO pg_collation_for(x) AS '"default"'`,
+
+		// pg_partition_ancestors - psql 18 \d <table> asks for the relation's partition
+		// ancestors (a set in PostgreSQL). DuckDB has no partition hierarchy, so the
+		// relation is its own and only ancestor.
+		`CREATE OR REPLACE MACRO pg_partition_ancestors(relid) AS try_cast(relid AS BIGINT)`,
 
 		// pg_input_is_valid - PG15 input validator over a bounded set of types via try_cast.
 		`CREATE OR REPLACE MACRO pg_input_is_valid(s, t) AS
@@ -1774,7 +1794,7 @@ func initInformationSchema(db *sql.DB, duckLakeMode bool) error {
 			'__duckgres_column_metadata', '__duckgres_iceberg_column_metadata',
 			-- pg_catalog compat views
 			'pg_class_full', 'pg_collation', 'pg_database', 'pg_inherits',
-			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel',
+			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel', 'pg_publication_namespace',
 			'pg_publication_tables', 'pg_roles', 'pg_rules', 'pg_statistic_ext', 'pg_matviews',
 			'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 			'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',
@@ -1844,7 +1864,7 @@ func initInformationSchema(db *sql.DB, duckLakeMode bool) error {
 		WHERE v.table_name NOT IN (
 			-- pg_catalog compat views
 			'pg_class_full', 'pg_collation', 'pg_database', 'pg_inherits',
-			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel',
+			'pg_namespace', 'pg_policy', 'pg_publication', 'pg_publication_rel', 'pg_publication_namespace',
 			'pg_publication_tables', 'pg_roles', 'pg_rules', 'pg_statistic_ext', 'pg_matviews',
 			'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 			'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',
@@ -1958,14 +1978,14 @@ func recreatePgClassForDuckLake(db *sql.DB) error {
 			0 AS relfrozenxid,
 			NULL AS relminmxid,
 			NULL AS relacl,
-			NULL AS reloptions,
+			CAST(NULL AS VARCHAR[]) AS reloptions,
 			NULL AS relpartbound
 		FROM duckdb_tables()
 		WHERE database_name = 'ducklake'
 		  AND table_name NOT IN (
 				'pg_database', 'pg_class_full', 'pg_collation', 'pg_policy', 'pg_roles',
 				'pg_statistic_ext', 'pg_publication_tables', 'pg_rules', 'pg_publication',
-				'pg_publication_rel', 'pg_inherits', 'pg_namespace', 'pg_matviews',
+				'pg_publication_rel', 'pg_publication_namespace', 'pg_inherits', 'pg_namespace', 'pg_matviews',
 				'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 				'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',
 				'information_schema_columns_compat', 'information_schema_tables_compat',
@@ -2009,14 +2029,14 @@ func recreatePgClassForDuckLake(db *sql.DB) error {
 			0 AS relfrozenxid,
 			NULL AS relminmxid,
 			NULL AS relacl,
-			NULL AS reloptions,
+			CAST(NULL AS VARCHAR[]) AS reloptions,
 			NULL AS relpartbound
 		FROM duckdb_views()
 		WHERE database_name = 'ducklake'
 		  AND view_name NOT IN (
 				'pg_database', 'pg_class_full', 'pg_collation', 'pg_policy', 'pg_roles',
 				'pg_statistic_ext', 'pg_publication_tables', 'pg_rules', 'pg_publication',
-				'pg_publication_rel', 'pg_inherits', 'pg_namespace', 'pg_matviews',
+				'pg_publication_rel', 'pg_publication_namespace', 'pg_inherits', 'pg_namespace', 'pg_matviews',
 				'pg_stat_user_tables', 'pg_statio_user_tables', 'pg_stat_statements', 'pg_stat_activity',
 				'pg_partitioned_table', 'pg_rewrite', 'pg_attribute',
 				'information_schema_columns_compat', 'information_schema_tables_compat',
@@ -2060,7 +2080,7 @@ func recreatePgClassForDuckLake(db *sql.DB) error {
 			0 AS relfrozenxid,
 			NULL AS relminmxid,
 			NULL AS relacl,
-			NULL AS reloptions,
+			CAST(NULL AS VARCHAR[]) AS reloptions,
 			NULL AS relpartbound
 		FROM duckdb_sequences()
 		WHERE database_name = 'ducklake'
@@ -2101,7 +2121,7 @@ func recreatePgClassForDuckLake(db *sql.DB) error {
 			0 AS relfrozenxid,
 			NULL AS relminmxid,
 			NULL AS relacl,
-			NULL AS reloptions,
+			CAST(NULL AS VARCHAR[]) AS reloptions,
 			NULL AS relpartbound
 		FROM duckdb_indexes()
 		WHERE database_name = 'ducklake'
