@@ -331,6 +331,10 @@ type Config struct {
 	// Queries from these users go directly to DuckDB without any PostgreSQL compatibility layer.
 	PassthroughUsers map[string]bool
 
+	// QueryAuditHook, when set, receives every statement a session runs (see
+	// QueryAuditHook). It does not depend on QueryLog or the metadata store.
+	QueryAuditHook QueryAuditHook
+
 	// QueryLog configures query-log collection and flushing.
 	QueryLog QueryLogConfig
 

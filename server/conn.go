@@ -1484,6 +1484,7 @@ func (c *clientConn) handleQuery(body []byte) (retErr error) {
 	// original: DuckDB would resolve a bare name on its own.
 	authorized, err := c.queryAccessPolicy.AuthorizeAndRewrite(query)
 	if err != nil {
+		c.audit(time.Time{}, query, 0, "42501", err.Error())
 		c.sendError("ERROR", "42501", err.Error())
 		_ = c.writeReadyForQuery(c.txStatus)
 		_ = c.flushWriter()

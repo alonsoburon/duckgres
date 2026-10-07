@@ -43,6 +43,7 @@ func (c *clientConn) handleParse(body []byte) {
 	// original: DuckDB would resolve a bare name on its own.
 	authorized, err := c.queryAccessPolicy.AuthorizeAndRewrite(query)
 	if err != nil {
+		c.audit(time.Time{}, query, 0, "42501", err.Error())
 		c.observeExtendedParseQueryError("42501", err.Error())
 		return
 	}

@@ -480,6 +480,12 @@ func (c *clientConn) logQuery(start time.Time, query, transpiledQuery, cmdType s
 	profilingSummary := c.lastProfilingSummary
 	c.lastProfilingSummary = observe.QueryProfilingSummary{}
 
+	auditRows := resultRows
+	if auditRows == 0 {
+		auditRows = writtenRows
+	}
+	c.audit(start, query, auditRows, errCode, errMsg)
+
 	if isQueryLogSelfReferential(query) {
 		return
 	}
