@@ -361,6 +361,9 @@ func (c *clientConn) executeSelectQuery(query string, cmdType string, workerStat
 	if err := stream.rowsErr; err != nil {
 		queryFinalErr = err
 		errCode := "42000"
+		if sc := embedderSQLState(err); sc != "" {
+			errCode = sc
+		}
 		errMsg := err.Error()
 		if c.isCallerCancellation(err) {
 			errCode = "57014"

@@ -122,6 +122,9 @@ func isDuckLakeMetadataConnectionLost(err error) bool {
 // errors are classified by DuckDB's exception-type prefix; the prefix is the
 // only signal the Go driver exposes today, so we parse the message string.
 func classifyErrorCode(err error) string {
+	if code := embedderSQLState(err); code != "" {
+		return code
+	}
 	// Wire-side SQLSTATE: 57014 is correct for any cancellation regardless of
 	// whether the caller drove it. Use isQueryCancelled here, not the
 	// clientConn-aware variant — classifyErrorCode is called from contexts
@@ -427,4 +430,16 @@ func isWorkerOutOfMemoryError(err error) bool {
 	return strings.Contains(msg, "Out of Memory Error") ||
 		strings.Contains(msg, "failed to allocate data of size") ||
 		strings.Contains(msg, "could not allocate block of size")
+}
+
+// embedderSQLState returns the SQLSTATE an embedder attached to err by
+// implementing SQLState() string (like transform.CodedError). Embedders that
+// wrap the QueryExecutor (Duct's per-role quotas, 53400) use it so the wire
+// error carries their code instead of a generic one. "" when err has none.
+func embedderSQLState(err error) string {
+	var coded interface{ SQLState() string }
+	if err != nil && errors.As(err, &coded) {
+		return coded.SQLState()
+	}
+	return ""
 }

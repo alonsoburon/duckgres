@@ -1127,6 +1127,9 @@ func (c *clientConn) handleExecute(body []byte) {
 	if err := stream.rowsErr; err != nil {
 		queryFinalErr = err
 		errCode := "42000"
+		if sc := embedderSQLState(err); sc != "" {
+			errCode = sc
+		}
 		errMsg := err.Error()
 		if c.statementTimedOut(err) || c.isCallerCancellation(err) {
 			errCode = "57014"
@@ -1213,6 +1216,9 @@ func (c *clientConn) resumeSuspendedPortal(p *portal, maxRows int32) {
 	if err := stream.rowsErr; err != nil {
 		p.closeExec()
 		errCode := "42000"
+		if sc := embedderSQLState(err); sc != "" {
+			errCode = sc
+		}
 		errMsg := err.Error()
 		if c.statementTimedOut(err) || c.isCallerCancellation(err) {
 			errCode = "57014"
