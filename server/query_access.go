@@ -37,6 +37,16 @@ type QueryAccessPolicy struct {
 	// in the DuckLake catalog. Required for DefaultSchema; without it bare names
 	// are rejected. A lookup error rejects the query.
 	RelationExists func(schema, relation string) (bool, error)
+
+	// Intercept, when set, is asked about every statement before it is
+	// authorized (AuthorizeAndRewrite only). handled=false: carry on with the
+	// normal policy. handled=true and err=nil: the embedder ran the statement
+	// itself and replacement is a trusted SQL (a constant SELECT with the
+	// result) that is executed INSTEAD of the original, without authorization.
+	// An error refuses the statement (reported as 42501 like a policy denial).
+	// Embedders use it for administrative statements that are not SQL for
+	// DuckDB at all (Duct's GRANT ... / ALTER TABLE ... SET ROW FILTER).
+	Intercept func(query string) (replacement string, handled bool, err error)
 }
 
 // QueryAccessError is returned when a project-scoped principal attempts an
@@ -192,6 +202,13 @@ func (p *QueryAccessPolicy) Authorize(query string) error {
 // schema-qualified path is untouched. A bare name that does not exist in the
 // default schema is rejected, whatever it might resolve to elsewhere.
 func (p *QueryAccessPolicy) AuthorizeAndRewrite(query string) (string, error) {
+	if p != nil && p.Intercept != nil {
+		if repl, handled, err := p.Intercept(query); err != nil {
+			return query, err
+		} else if handled {
+			return repl, nil
+		}
+	}
 	return p.authorize(query, true)
 }
 
