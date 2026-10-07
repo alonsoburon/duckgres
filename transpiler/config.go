@@ -27,6 +27,11 @@ type Config struct {
 	// ConvertPlaceholders converts PostgreSQL $1, $2 placeholders to ? for database/sql.
 	// This is needed for the extended query protocol (prepared statements).
 	ConvertPlaceholders bool
+
+	// SessionUser is the authenticated login of the session. When set,
+	// CURRENT_USER, SESSION_USER, USER and CURRENT_ROLE evaluate to it instead
+	// of DuckDB's fixed "duckdb". Empty keeps the native behaviour.
+	SessionUser string
 }
 
 // DefaultConfig returns a Config with sensible defaults for simple queries.

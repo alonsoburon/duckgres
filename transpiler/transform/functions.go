@@ -9,10 +9,20 @@ import (
 
 // FunctionTransform converts PostgreSQL function calls to DuckDB equivalents.
 // Based on sqlglot's DuckDB dialect function mappings.
-type FunctionTransform struct{}
+type FunctionTransform struct {
+	// SessionUser, when non-empty, replaces CURRENT_USER / SESSION_USER / USER /
+	// CURRENT_ROLE with the authenticated login (DuckDB itself reports "duckdb").
+	SessionUser string
+}
 
 func NewFunctionTransform() *FunctionTransform {
 	return &FunctionTransform{}
+}
+
+// NewFunctionTransformWithSessionUser is NewFunctionTransform for a session with
+// a known login.
+func NewFunctionTransformWithSessionUser(user string) *FunctionTransform {
+	return &FunctionTransform{SessionUser: user}
 }
 
 func (t *FunctionTransform) Name() string {
@@ -170,7 +180,20 @@ func (t *FunctionTransform) Transform(tree *pg_query.ParseResult, result *Result
 	changed := false
 
 	WalkFunc(tree, func(node *pg_query.Node) bool {
+		if rt := node.GetResTarget(); rt != nil && t.SessionUser != "" && rt.Name == "" {
+			// Keep PostgreSQL's column label ("current_user") once the keyword
+			// below is replaced by a literal.
+			if label := sessionUserLabel(rt.Val); label != "" {
+				rt.Name = label
+				changed = true
+			}
+		}
 		if svf := node.GetSqlvalueFunction(); svf != nil {
+			if t.SessionUser != "" && sessionUserLabelOf(svf) != "" {
+				node.Node = pg_query.MakeAConstStrNode(t.SessionUser, svf.Location).Node
+				changed = true
+				return true
+			}
 			if t.transformSQLValueFunction(svf) {
 				changed = true
 			}
@@ -199,6 +222,33 @@ func (t *FunctionTransform) Transform(tree *pg_query.ParseResult, result *Result
 	})
 
 	return changed, nil
+}
+
+// sessionUserLabelOf returns the PostgreSQL column label of an identity keyword
+// (CURRENT_USER, SESSION_USER, USER, CURRENT_ROLE), or "" for any other
+// SQLValueFunction.
+func sessionUserLabelOf(svf *pg_query.SQLValueFunction) string {
+	switch svf.Op {
+	case pg_query.SQLValueFunctionOp_SVFOP_CURRENT_USER:
+		return "current_user"
+	case pg_query.SQLValueFunctionOp_SVFOP_SESSION_USER:
+		return "session_user"
+	case pg_query.SQLValueFunctionOp_SVFOP_USER:
+		return "user"
+	case pg_query.SQLValueFunctionOp_SVFOP_CURRENT_ROLE:
+		return "current_role"
+	}
+	return ""
+}
+
+func sessionUserLabel(val *pg_query.Node) string {
+	if val == nil {
+		return ""
+	}
+	if svf := val.GetSqlvalueFunction(); svf != nil {
+		return sessionUserLabelOf(svf)
+	}
+	return ""
 }
 
 // transformSQLValueFunction rewrites the precision forms LOCALTIME(p),

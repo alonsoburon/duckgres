@@ -389,6 +389,7 @@ func (c *clientConn) newTranspiler(convertPlaceholders bool) *transpiler.Transpi
 		LogicalDatabaseName: logicalDatabaseName,
 		PhysicalCatalogName: physicalCatalog,
 		ConvertPlaceholders: convertPlaceholders,
+		SessionUser:         c.username,
 	})
 }
 

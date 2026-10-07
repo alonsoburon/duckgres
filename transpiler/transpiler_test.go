@@ -5030,3 +5030,74 @@ func TestClassifierCovers_PgCatalogViews(t *testing.T) {
 		})
 	}
 }
+
+func TestTranspile_SessionUser(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains []string
+		absent   []string
+	}{
+		{
+			name:     "current_user keeps its column name",
+			input:    "SELECT current_user",
+			contains: []string{`'alice' AS "current_user"`},
+			absent:   []string{"duckdb"},
+		},
+		{
+			name:     "session_user and user",
+			input:    "SELECT session_user, user, current_role",
+			contains: []string{`'alice' AS "session_user"`, `'alice' AS "user"`, `'alice' AS "current_role"`},
+		},
+		{
+			name:     "explicit alias wins",
+			input:    "SELECT current_user AS me",
+			contains: []string{"'alice' AS me"},
+		},
+		{
+			name:     "usable in predicates",
+			input:    "SELECT 1 FROM t WHERE owner = current_user",
+			contains: []string{"owner = 'alice'"},
+		},
+		{
+			name:     "login with quote is escaped",
+			input:    "SELECT current_user",
+			contains: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := "alice"
+			if tt.name == "login with quote is escaped" {
+				user = "o'brien"
+				tt.contains = []string{"'o''brien'"}
+			}
+			tr := New(Config{DuckLakeMode: true, SessionUser: user})
+			result, err := tr.Transpile(tt.input)
+			if err != nil {
+				t.Fatalf("Transpile(%q) error: %v", tt.input, err)
+			}
+			for _, want := range tt.contains {
+				if !strings.Contains(result.SQL, want) {
+					t.Errorf("Transpile(%q) = %q, should contain %q", tt.input, result.SQL, want)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(result.SQL, bad) {
+					t.Errorf("Transpile(%q) = %q, should not contain %q", tt.input, result.SQL, bad)
+				}
+			}
+		})
+	}
+}
+
+func TestTranspile_SessionUserUnsetKeepsNativeBehaviour(t *testing.T) {
+	tr := New(Config{DuckLakeMode: true})
+	result, err := tr.Transpile("SELECT current_user")
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	if strings.Contains(result.SQL, "'") {
+		t.Errorf("SessionUser unset must not inject a literal, got %q", result.SQL)
+	}
+}

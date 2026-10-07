@@ -115,7 +115,7 @@ func New(cfg Config) *Transpiler {
 	t.transforms = append(t.transforms, taggedTransform{FlagTypeCast, transform.NewTypeCastTransform()})
 
 	// 6. Function mappings (array_agg->list, string_to_array->string_split, etc.)
-	t.transforms = append(t.transforms, taggedTransform{FlagFunctions, transform.NewFunctionTransform()})
+	t.transforms = append(t.transforms, taggedTransform{FlagFunctions, transform.NewFunctionTransformWithSessionUser(cfg.SessionUser)})
 
 	// 7. Function alias normalization (current_database() -> AS current_database)
 	t.transforms = append(t.transforms, taggedTransform{FlagFuncAlias, transform.NewFuncAliasTransform()})
@@ -557,6 +557,12 @@ func Classify(sql string, cfg Config) Classification {
 	// the result column name matches PostgreSQL (same mechanism that already
 	// handles CURRENT_USER/SESSION_USER). The bare tokens subsume the
 	// CURRENT_SCHEMA()/CURRENT_SCHEMAS()/CURRENT_CATALOG() forms as substrings.
+	// With a session user configured, the identity keywords are rewritten to the
+	// login (FunctionTransform). USER / CURRENT_ROLE are matched loosely: a false
+	// positive only costs a parse.
+	if cfg.SessionUser != "" && containsAny(upper, "CURRENT_USER", "SESSION_USER", "USER", "CURRENT_ROLE") {
+		flags |= FlagFunctions
+	}
 	if containsAny(upperNoParenWS,
 		"CURRENT_DATABASE(", "CURRENT_SCHEMA",
 		"CURRENT_USER", "CURRENT_CATALOG", "SESSION_USER",
