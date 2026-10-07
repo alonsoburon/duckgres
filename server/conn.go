@@ -1479,12 +1479,16 @@ func (c *clientConn) handleQuery(body []byte) (retErr error) {
 		_ = c.flushWriter()
 		return nil
 	}
-	if err := c.queryAccessPolicy.Authorize(query); err != nil {
+	// Scoped sessions run the rewritten SQL (bare names qualified), never the
+	// original: DuckDB would resolve a bare name on its own.
+	authorized, err := c.queryAccessPolicy.AuthorizeAndRewrite(query)
+	if err != nil {
 		c.sendError("ERROR", "42501", err.Error())
 		_ = c.writeReadyForQuery(c.txStatus)
 		_ = c.flushWriter()
 		return nil
 	}
+	query = authorized
 
 	// Redacted form for everything observable (pg_stat_activity, spans,
 	// logs): CREATE SECRET option lists carry credential material.

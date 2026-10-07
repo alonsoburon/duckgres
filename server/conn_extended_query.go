@@ -39,10 +39,14 @@ func (c *clientConn) handleParse(body []byte) {
 		c.sendError("ERROR", "08P01", "invalid Parse message")
 		return
 	}
-	if err := c.queryAccessPolicy.Authorize(query); err != nil {
+	// Scoped sessions run the rewritten SQL (bare names qualified), never the
+	// original: DuckDB would resolve a bare name on its own.
+	authorized, err := c.queryAccessPolicy.AuthorizeAndRewrite(query)
+	if err != nil {
 		c.observeExtendedParseQueryError("42501", err.Error())
 		return
 	}
+	query = authorized
 	// Read number of parameter types
 	var numParamTypes int16
 	if err := binary.Read(reader, binary.BigEndian, &numParamTypes); err != nil {

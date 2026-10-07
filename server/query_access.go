@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/posthog/duckgres/server/sqlcore"
 )
 
 // QueryAccessPolicy is a fail-closed SQL policy for a project-scoped user.
@@ -21,6 +24,19 @@ type QueryAccessPolicy struct {
 	ReadOnly         bool
 	AllowedSchemas   []string
 	AllowedRelations []string
+
+	// DefaultSchema makes bare relation names usable: AuthorizeAndRewrite
+	// qualifies a bare read reference as ducklake.<DefaultSchema>.<name>, but
+	// only when RelationExists confirms <name> lives in that schema. It never
+	// guesses: DuckDB itself would resolve an unqualified name through its own
+	// search_path (typically main), so approving "<DefaultSchema>.<name>" while
+	// executing the bare spelling would be a bypass. Empty keeps the strict
+	// rule that every relation is schema-qualified.
+	DefaultSchema string
+	// RelationExists reports whether schema.relation (a table or view) exists
+	// in the DuckLake catalog. Required for DefaultSchema; without it bare names
+	// are rejected. A lookup error rejects the query.
+	RelationExists func(schema, relation string) (bool, error)
 }
 
 // QueryAccessError is returned when a project-scoped principal attempts an
@@ -133,6 +149,13 @@ type queryAuthorizer struct {
 	writable         bool
 	allowedSchemas   map[string]struct{}
 	allowedRelations map[string]struct{}
+
+	// Bare-name resolution (AuthorizeAndRewrite only). defaultSchema == ""
+	// means bare names are rejected.
+	defaultSchema  string
+	relationExists func(schema, relation string) (bool, error)
+	lookups        map[string]bool
+	rewritten      bool
 }
 
 // Authorize verifies that every persistent relation a query touches is owned by
@@ -141,20 +164,43 @@ type queryAuthorizer struct {
 // fallback is deliberately unavailable to scoped users because an unparsed
 // statement cannot be authorized safely.
 func (p *QueryAccessPolicy) Authorize(query string) error {
+	_, err := p.authorize(query, false)
+	return err
+}
+
+// AuthorizeAndRewrite is Authorize plus bare-name resolution: when the policy
+// has a DefaultSchema, every bare read reference that exists in that schema is
+// qualified in the parsed tree and the SQL to EXECUTE is returned (deparsed from
+// the rewritten tree). Callers must run the returned SQL, never the original,
+// otherwise DuckDB would resolve the bare name on its own.
+//
+// A query that needed no rewrite is returned verbatim, so the common
+// schema-qualified path is untouched. A bare name that does not exist in the
+// default schema is rejected, whatever it might resolve to elsewhere.
+func (p *QueryAccessPolicy) AuthorizeAndRewrite(query string) (string, error) {
+	return p.authorize(query, true)
+}
+
+func (p *QueryAccessPolicy) authorize(query string, rewrite bool) (string, error) {
 	if p == nil {
-		return nil
+		return query, nil
 	}
 	if handled, err := authorizeProjectUse(query); handled {
-		return err
+		return query, err
 	}
 	az := &queryAuthorizer{
 		writable:         !p.ReadOnly,
 		allowedSchemas:   normalizedSet(p.AllowedSchemas),
 		allowedRelations: normalizedSet(p.AllowedRelations),
 	}
+	if rewrite && strings.TrimSpace(p.DefaultSchema) != "" {
+		az.defaultSchema = strings.ToLower(strings.TrimSpace(p.DefaultSchema))
+		az.relationExists = p.RelationExists
+		az.lookups = make(map[string]bool)
+	}
 	tree, err := pg_query.Parse(query)
 	if err != nil {
-		return &QueryAccessError{Reason: az.unparsedReason()}
+		return query, &QueryAccessError{Reason: az.unparsedReason()}
 	}
 
 	for _, raw := range tree.Stmts {
@@ -162,14 +208,21 @@ func (p *QueryAccessPolicy) Authorize(query string) error {
 			continue
 		}
 		if err := az.authorizeStatement(raw.Stmt); err != nil {
-			return err
+			return query, err
 		}
 
 		if err := az.walk(raw.Stmt, nil); err != nil {
-			return err
+			return query, err
 		}
 	}
-	return nil
+	if !az.rewritten {
+		return query, nil
+	}
+	rewritten, err := pg_query.Deparse(tree)
+	if err != nil {
+		return query, &QueryAccessError{Reason: "could not resolve unqualified relation names"}
+	}
+	return rewritten, nil
 }
 
 func (az *queryAuthorizer) unparsedReason() string {
@@ -573,9 +626,42 @@ func (az *queryAuthorizer) authorizeRangeVar(rv *pg_query.RangeVar, cteNames map
 		if _, ok := unqualifiedMetadataRelations[relation]; ok {
 			return nil
 		}
+		if az.defaultSchema != "" {
+			return az.resolveBareRelation(rv)
+		}
 		return &QueryAccessError{Reason: fmt.Sprintf("relation %q must be schema-qualified", rv.Relname)}
 	}
 	return az.authorizeQualifiedRelation(rv.Catalogname, rv.Schemaname, rv.Relname)
+}
+
+// resolveBareRelation qualifies a bare read reference into the default schema,
+// in place, if (and only if) the relation exists there. Anything else is
+// rejected, including names that exist only outside the role's schemas.
+func (az *queryAuthorizer) resolveBareRelation(rv *pg_query.RangeVar) error {
+	notFound := &QueryAccessError{Reason: fmt.Sprintf("relation %q does not exist in schema %q; qualify it with its schema", rv.Relname, az.defaultSchema)}
+	if az.relationExists == nil {
+		return &QueryAccessError{Reason: fmt.Sprintf("relation %q must be schema-qualified", rv.Relname)}
+	}
+	key := az.defaultSchema + "." + strings.ToLower(rv.Relname)
+	exists, cached := az.lookups[key]
+	if !cached {
+		var err error
+		exists, err = az.relationExists(az.defaultSchema, rv.Relname)
+		if err != nil {
+			return &QueryAccessError{Reason: fmt.Sprintf("could not resolve relation %q", rv.Relname)}
+		}
+		az.lookups[key] = exists
+	}
+	if !exists {
+		return notFound
+	}
+	if err := az.authorizeQualifiedRelation("ducklake", az.defaultSchema, rv.Relname); err != nil {
+		return err
+	}
+	rv.Catalogname = "ducklake"
+	rv.Schemaname = az.defaultSchema
+	az.rewritten = true
+	return nil
 }
 
 func (az *queryAuthorizer) authorizeQualifiedRelation(catalogName, schemaName, relationName string) error {
@@ -634,4 +720,27 @@ func NormalizeQueryAccessPolicy(policy QueryAccessPolicy) QueryAccessPolicy {
 	sort.Strings(policy.AllowedSchemas)
 	sort.Strings(policy.AllowedRelations)
 	return policy
+}
+
+// NewRelationLookup returns a QueryAccessPolicy.RelationExists backed by the
+// session's executor: it asks DuckDB whether schema.relation is a table or view
+// in catalog (normally "ducklake"). It runs before the client's statement, on
+// the same session, so it sees exactly what that statement would.
+func NewRelationLookup(exec sqlcore.QueryExecutor, catalog string) func(schema, relation string) (bool, error) {
+	const lookupSQL = `
+		SELECT 1 FROM duckdb_tables()
+		WHERE database_name = ? AND lower(schema_name) = lower(?) AND lower(table_name) = lower(?)
+		UNION ALL
+		SELECT 1 FROM duckdb_views()
+		WHERE database_name = ? AND lower(schema_name) = lower(?) AND lower(view_name) = lower(?)
+		LIMIT 1`
+	return func(schema, relation string) (bool, error) {
+		rows, err := exec.QueryContext(context.Background(), lookupSQL, catalog, schema, relation, catalog, schema, relation)
+		if err != nil {
+			return false, err
+		}
+		defer func() { _ = rows.Close() }()
+		found := rows.Next()
+		return found, rows.Err()
+	}
 }
