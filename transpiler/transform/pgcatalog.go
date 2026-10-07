@@ -30,7 +30,7 @@ func NewPgCatalogTransform() *PgCatalogTransform {
 
 // NewPgCatalogTransformWithConfig creates a new PgCatalogTransform with configuration.
 func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
-	return &PgCatalogTransform{
+	t := &PgCatalogTransform{
 		DuckLakeMode: duckLakeMode,
 		ViewMappings: map[string]string{
 			"pg_class":                "pg_class_full",
@@ -318,6 +318,15 @@ func NewPgCatalogTransformWithConfig(duckLakeMode bool) *PgCatalogTransform {
 			"ifnull":            true,
 		},
 	}
+	if duckLakeMode {
+		// Session views (server/sessionmeta) that narrow DuckDB's native
+		// catalogs to what the session may see; they only exist alongside
+		// DuckLake session metadata.
+		t.ViewMappings["pg_description"] = "pg_description"
+		t.ViewMappings["pg_attrdef"] = "pg_attrdef"
+		t.ViewMappings["pg_settings"] = "pg_settings"
+	}
+	return t
 }
 
 func (t *PgCatalogTransform) Name() string {

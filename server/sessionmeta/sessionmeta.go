@@ -192,6 +192,11 @@ func buildSessionMetadataSQL(database string, accessPolicies ...*MetadataAccessP
 		buildSessionInformationSchemaSchemataViewSQL(access),
 		buildSessionInformationSchemaViewsViewSQL(access),
 		buildSessionInformationSchemaSequencesViewSQL(access),
+		buildSessionInformationSchemaTableConstraintsViewSQL(access),
+		buildSessionInformationSchemaKeyColumnUsageViewSQL(access),
+		buildSessionPgDescriptionViewSQL(access),
+		buildSessionPgAttrdefViewSQL(access),
+		buildSessionPgSettingsViewSQL(access),
 	}
 	return strings.Join(parts, ";\n") + ";"
 }
@@ -337,6 +342,8 @@ func internalCompatRelationNamesSQL() string {
 		'information_schema_columns_compat', 'information_schema_tables_compat',
 		'information_schema_schemata_compat', 'information_schema_views_compat',
 		'information_schema_sequences_compat', 'information_schema_routines_compat',
+		'information_schema_table_constraints_compat', 'information_schema_key_column_usage_compat',
+		'pg_description', 'pg_attrdef', 'pg_settings',
 		'__duckgres_column_metadata',
 		-- Legacy: created by pre-Iceberg-removal versions (CREATE TABLE IF NOT
 		-- EXISTS, instance-lifetime). Keep excluded so a hot-idle worker warmed
@@ -1069,6 +1076,107 @@ func buildSessionInformationSchemaSequencesViewSQL(access *MetadataAccessPolicy)
 			AND {{ACCESS}}
 	`
 	return strings.Replace(sql, "{{ACCESS}}", access.relationPredicate("s.schema_name", "s.sequence_name"), 1)
+}
+
+// buildSessionInformationSchemaTableConstraintsViewSQL exposes DuckDB's native
+// table_constraints (PRIMARY KEY / CHECK / UNIQUE / FOREIGN KEY), restricted to
+// the relations the session may see. JDBC drivers read it for key metadata.
+func buildSessionInformationSchemaTableConstraintsViewSQL(access *MetadataAccessPolicy) string {
+	sql := `
+		CREATE OR REPLACE VIEW main.information_schema_table_constraints_compat AS
+		SELECT tc.* REPLACE (
+			CASE WHEN tc.constraint_catalog IN ('ducklake', 'memory') THEN current_database() ELSE tc.constraint_catalog END AS constraint_catalog,
+			CASE WHEN tc.constraint_schema = 'main' THEN 'public' ELSE tc.constraint_schema END AS constraint_schema,
+			CASE WHEN tc.table_catalog IN ('ducklake', 'memory') THEN current_database() ELSE tc.table_catalog END AS table_catalog,
+			CASE WHEN tc.table_schema = 'main' THEN 'public' ELSE tc.table_schema END AS table_schema
+		)
+		FROM information_schema.table_constraints tc
+		WHERE tc.table_name NOT IN (` + internalCompatRelationNamesSQL() + `)
+		AND (
+			tc.table_catalog = current_database()
+			OR tc.table_catalog IN ('ducklake', 'memory')
+		)
+		AND {{ACCESS}}
+	`
+	return strings.Replace(sql, "{{ACCESS}}", access.relationPredicate("tc.table_schema", "tc.table_name"), 1)
+}
+
+// buildSessionInformationSchemaKeyColumnUsageViewSQL is the key_column_usage
+// counterpart of the table_constraints view above.
+func buildSessionInformationSchemaKeyColumnUsageViewSQL(access *MetadataAccessPolicy) string {
+	sql := `
+		CREATE OR REPLACE VIEW main.information_schema_key_column_usage_compat AS
+		SELECT k.* REPLACE (
+			CASE WHEN k.constraint_catalog IN ('ducklake', 'memory') THEN current_database() ELSE k.constraint_catalog END AS constraint_catalog,
+			CASE WHEN k.constraint_schema = 'main' THEN 'public' ELSE k.constraint_schema END AS constraint_schema,
+			CASE WHEN k.table_catalog IN ('ducklake', 'memory') THEN current_database() ELSE k.table_catalog END AS table_catalog,
+			CASE WHEN k.table_schema = 'main' THEN 'public' ELSE k.table_schema END AS table_schema
+		)
+		FROM information_schema.key_column_usage k
+		WHERE k.table_name NOT IN (` + internalCompatRelationNamesSQL() + `)
+		AND (
+			k.table_catalog = current_database()
+			OR k.table_catalog IN ('ducklake', 'memory')
+		)
+		AND {{ACCESS}}
+	`
+	return strings.Replace(sql, "{{ACCESS}}", access.relationPredicate("k.table_schema", "k.table_name"), 1)
+}
+
+// buildSessionPgDescriptionViewSQL narrows pg_description to comments on
+// objects the session can see (its relations, namespaces and the built-in
+// functions). Unrestricted sessions get the native view unchanged.
+func buildSessionPgDescriptionViewSQL(access *MetadataAccessPolicy) string {
+	filter := "TRUE"
+	if access != nil {
+		filter = `d.objoid IN (SELECT oid FROM main.pg_class_full)
+			OR d.objoid IN (SELECT oid FROM main.pg_namespace)
+			OR d.objoid IN (SELECT oid FROM pg_catalog.pg_proc)`
+	}
+	return fmt.Sprintf(`
+		CREATE OR REPLACE VIEW main.pg_description AS
+		SELECT d.* FROM pg_catalog.pg_description d WHERE %s
+	`, filter)
+}
+
+// buildSessionPgAttrdefViewSQL narrows pg_attrdef to the session's relations.
+func buildSessionPgAttrdefViewSQL(access *MetadataAccessPolicy) string {
+	filter := "TRUE"
+	if access != nil {
+		filter = "a.adrelid IN (SELECT oid FROM main.pg_class_full)"
+	}
+	return fmt.Sprintf(`
+		CREATE OR REPLACE VIEW main.pg_attrdef AS
+		SELECT a.* FROM pg_catalog.pg_attrdef a WHERE %s
+	`, filter)
+}
+
+// restrictedPgSettings is the only part of pg_settings a restricted session
+// sees: DuckDB's native view lists every engine setting, some of which
+// (S3 keys, secret directories, file paths) must not leave the server.
+var restrictedPgSettings = []string{
+	"application_name", "client_encoding", "datestyle", "extra_float_digits",
+	"integer_datetimes", "max_index_keys", "server_encoding", "server_version",
+	"server_version_num", "standard_conforming_strings", "timezone",
+	"transaction_isolation",
+}
+
+// buildSessionPgSettingsViewSQL exposes pg_settings. It adds max_index_keys
+// (pgjdbc reads it for DatabaseMetaData key lookups) and, for restricted
+// sessions, drops everything outside restrictedPgSettings.
+func buildSessionPgSettingsViewSQL(access *MetadataAccessPolicy) string {
+	filter := "TRUE"
+	if access != nil {
+		filter = fmt.Sprintf("lower(s.name) IN (%s)", quotedSQLValues(restrictedPgSettings))
+	}
+	return fmt.Sprintf(`
+		CREATE OR REPLACE VIEW main.pg_settings AS
+		SELECT s.name, s.setting, s.short_desc, s.vartype
+		FROM pg_catalog.pg_settings s
+		WHERE s.name <> 'max_index_keys' AND %s
+		UNION ALL
+		SELECT 'max_index_keys', '32', 'Shows the maximum number of index keys.', 'integer'
+	`, filter)
 }
 
 func quoteSQLStringLiteral(value string) string {

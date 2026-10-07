@@ -95,7 +95,7 @@ func New(cfg Config) *Transpiler {
 	t.transforms = append(t.transforms, taggedTransform{FlagPgCatalog, transform.NewPgCatalogTransformWithConfig(catalogPolicy.QualifyMacros)})
 
 	// 3. information_schema mappings to compat views
-	t.transforms = append(t.transforms, taggedTransform{FlagInfoSchema, transform.NewInformationSchemaTransform()})
+	t.transforms = append(t.transforms, taggedTransform{FlagInfoSchema, transform.NewInformationSchemaTransformWithConfig(catalogPolicy.QualifyMacros)})
 
 	// 3.1 Map PostgreSQL "public" schema to DuckDB "main" (backends whose default
 	// schema is "main"; disabled for backends whose schema is literally "public")

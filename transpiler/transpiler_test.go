@@ -257,6 +257,31 @@ func TestTranspile_InformationSchema_DuckLakeMode(t *testing.T) {
 			input:    "SELECT * FROM information_schema.tables",
 			contains: "memory.main.information_schema_tables_compat",
 		},
+		{
+			name:     "table_constraints with DuckLake -> session view",
+			input:    "SELECT * FROM information_schema.table_constraints",
+			contains: "memory.main.information_schema_table_constraints_compat",
+		},
+		{
+			name:     "key_column_usage with DuckLake -> session view",
+			input:    "SELECT * FROM information_schema.key_column_usage",
+			contains: "memory.main.information_schema_key_column_usage_compat",
+		},
+		{
+			name:     "pg_description with DuckLake -> session view",
+			input:    "SELECT * FROM pg_catalog.pg_description",
+			contains: "memory.main.pg_description",
+		},
+		{
+			name:     "unqualified pg_attrdef with DuckLake -> session view",
+			input:    "SELECT * FROM pg_attrdef",
+			contains: "memory.main.pg_attrdef",
+		},
+		{
+			name:     "pg_settings with DuckLake -> session view",
+			input:    "SELECT name FROM pg_settings",
+			contains: "memory.main.pg_settings",
+		},
 	}
 
 	tr := New(Config{DuckLakeMode: true})

@@ -23,7 +23,7 @@ func NewInformationSchemaTransform() *InformationSchemaTransform {
 
 // NewInformationSchemaTransformWithConfig creates a new InformationSchemaTransform with configuration.
 func NewInformationSchemaTransformWithConfig(duckLakeMode bool) *InformationSchemaTransform {
-	return &InformationSchemaTransform{
+	t := &InformationSchemaTransform{
 		DuckLakeMode: duckLakeMode,
 		ViewMappings: map[string]string{
 			"columns":   "information_schema_columns_compat",
@@ -34,6 +34,13 @@ func NewInformationSchemaTransformWithConfig(duckLakeMode bool) *InformationSche
 			"routines":  "information_schema_routines_compat",
 		},
 	}
+	if duckLakeMode {
+		// Session views (server/sessionmeta) that narrow DuckDB's native
+		// constraint metadata to what the session may see.
+		t.ViewMappings["table_constraints"] = "information_schema_table_constraints_compat"
+		t.ViewMappings["key_column_usage"] = "information_schema_key_column_usage_compat"
+	}
+	return t
 }
 
 func (t *InformationSchemaTransform) Name() string {

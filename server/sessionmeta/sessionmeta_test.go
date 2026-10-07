@@ -203,3 +203,44 @@ func TestInitSessionDatabaseMetadataProbesWhenAttachmentUnknown(t *testing.T) {
 		t.Errorf("issued %d probe queries, want 1", exec.queryCalls)
 	}
 }
+
+func TestRestrictedSessionMetadataNarrowsCatalogViews(t *testing.T) {
+	access := &MetadataAccessPolicy{AllowedSchemas: []string{"role_a"}}
+	got := buildSessionMetadataSQL("analytics", access)
+
+	for _, want := range []string{
+		"CREATE OR REPLACE VIEW main.information_schema_table_constraints_compat",
+		"CREATE OR REPLACE VIEW main.information_schema_key_column_usage_compat",
+		"CREATE OR REPLACE VIEW main.pg_description",
+		"CREATE OR REPLACE VIEW main.pg_attrdef",
+		"CREATE OR REPLACE VIEW main.pg_settings",
+		"lower(tc.table_schema) IN ('role_a')",
+		"lower(k.table_schema) IN ('role_a')",
+		"d.objoid IN (SELECT oid FROM main.pg_class_full)",
+		"a.adrelid IN (SELECT oid FROM main.pg_class_full)",
+		"lower(s.name) IN (",
+		"'max_index_keys'",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("restricted metadata SQL missing %q", want)
+		}
+	}
+}
+
+func TestUnrestrictedSessionMetadataDoesNotFilterCatalogViews(t *testing.T) {
+	got := buildSessionPgDescriptionViewSQL(nil) + buildSessionPgAttrdefViewSQL(nil) + buildSessionPgSettingsViewSQL(nil)
+	if strings.Contains(got, "pg_class_full") || strings.Contains(got, "lower(s.name) IN") {
+		t.Errorf("unrestricted sessions must see the native catalogs, got:\n%s", got)
+	}
+}
+
+func TestRestrictedPgSettingsNeverListsCredentialSettings(t *testing.T) {
+	for _, name := range restrictedPgSettings {
+		lower := strings.ToLower(name)
+		for _, bad := range []string{"s3_", "secret", "key_id", "token", "password", "directory", "home"} {
+			if strings.Contains(lower, bad) {
+				t.Errorf("restrictedPgSettings exposes %q", name)
+			}
+		}
+	}
+}

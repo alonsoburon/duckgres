@@ -63,26 +63,38 @@ var dangerousReadFunctions = map[string]struct{}{
 	"write_file":            {},
 }
 
+// unqualifiedMetadataRelations are the read-only pg_catalog relations a scoped
+// connection may query. The ones that describe user objects are served from
+// session views narrowed to the connection's schemas (server/sessionmeta);
+// pg_am, pg_proc and pg_collation describe the engine, not the data.
 var unqualifiedMetadataRelations = map[string]struct{}{
-	"pg_attribute":  {},
-	"pg_class":      {},
-	"pg_constraint": {},
-	"pg_database":   {},
-	"pg_index":      {},
-	"pg_namespace":  {},
-	"pg_roles":      {},
-	"pg_tables":     {},
-	"pg_type":       {},
-	"pg_views":      {},
+	"pg_am":          {},
+	"pg_attrdef":     {},
+	"pg_attribute":   {},
+	"pg_class":       {},
+	"pg_collation":   {},
+	"pg_constraint":  {},
+	"pg_database":    {},
+	"pg_description": {},
+	"pg_index":       {},
+	"pg_namespace":   {},
+	"pg_proc":        {},
+	"pg_roles":       {},
+	"pg_settings":    {},
+	"pg_tables":      {},
+	"pg_type":        {},
+	"pg_views":       {},
 }
 
 var informationSchemaRelations = map[string]struct{}{
-	"columns":   {},
-	"routines":  {},
-	"schemata":  {},
-	"sequences": {},
-	"tables":    {},
-	"views":     {},
+	"columns":           {},
+	"key_column_usage":  {},
+	"routines":          {},
+	"schemata":          {},
+	"sequences":         {},
+	"table_constraints": {},
+	"tables":            {},
+	"views":             {},
 }
 
 var allowedSetVariables = map[string]struct{}{
